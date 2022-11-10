@@ -29,46 +29,45 @@ type Worker( logger: ILogger<_> , appLifetime : IHostApplicationLifetime) as thi
 
                 this.applicationTask <-
                     async {
-                    try
                         try
+                            try
 
-                        // 1.normal
-                        // logger.LogInformation "Hello World!"
+                                // 1.normal
+                                // logger.LogInformation "Hello World!"
 
-                        // 2.error
-                        // failwith "my error!"
+                                // 2.error
+                                // failwith "my error!"
 
-                        // 3.user cancel
-                        do! async{
-                            while true do
-                            cancellationTokenSource.Token.ThrowIfCancellationRequested()
-                            $"{DateTime.Now}" |> logger.LogInformation
-                            do! Async.Sleep 1000
-                        }
+                                // 3.user cancel
+                                do! async{
+                                    while true do
+                                        cancellationTokenSource.Token.ThrowIfCancellationRequested()
+                                        $"{DateTime.Now}" |> logger.LogInformation
+                                        do! Async.Sleep 1000
+                                }
 
-                        this.exitCode <- Nullable(0)
-                        with
-                        | :? TaskCanceledException as ex ->
-                            // This means the application is shutting down, so just swallow this exception
-                            ()
-                        | :? OperationCanceledException as ex ->
-                            logger.LogError(ex, "USER'S CANCEL!");
-                        | _ as ex ->
-                            logger.LogError(ex, "MY ERROR!");
-                            this.exitCode <- Nullable(1)
-                    finally
-                        // Stop the application once the work is done
-                        appLifetime.StopApplication()
+                                this.exitCode <- Nullable(0)
+                            with
+                                | :? TaskCanceledException as ex ->
+                                    // This means the application is shutting down, so just swallow this exception
+                                    ()
+                                | :? OperationCanceledException as ex ->
+                                    logger.LogError(ex, "USER'S CANCEL!");
+                                | _ as ex ->
+                                    logger.LogError(ex, "MY ERROR!");
+                                    this.exitCode <- Nullable(1)
+                        finally
+                            // Stop the application once the work is done
+                            appLifetime.StopApplication()
                     }
                     |> Async.StartAsTask
                     :> Task
 
                 ) |> ignore
 
-
                 appLifetime.ApplicationStopping.Register(fun _ ->
-                logger.LogDebug("Application is stopping")
-                cancellationTokenSource.Cancel()
+                    logger.LogDebug("Application is stopping")
+                    cancellationTokenSource.Cancel()
                 ) |> ignore
 
                 return Task.CompletedTask
