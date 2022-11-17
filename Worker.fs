@@ -1,94 +1,114 @@
 namespace Worker
 
 open System
-open System.Collections.Generic
-open System.Linq
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
+open Microsoft.Extensions.Configuration
 
-type Worker( logger: ILogger<_> , appLifetime : IHostApplicationLifetime) as this =
+type Worker(
+    logger      : ILogger<Worker>
+  , config      : IConfiguration
+  , appLifetime : IHostApplicationLifetime
+  ) as this =
 
-    [<DefaultValue>] val mutable applicationTask : Task
-    [<DefaultValue>] val mutable exitCode : Nullable<int>
+  [<DefaultValue>] val mutable error    : exn
+  [<DefaultValue>] val mutable exitCode : Nullable<int>
 
-    interface IHostedService with
+  interface IHostedService with
 
-        member _.StartAsync(ct: CancellationToken): Task =
+    member _.StartAsync(ct: CancellationToken): Task =
 
-            async {
+      async {
 
-                let mutable cancellationTokenSource = Unchecked.defaultof<CancellationTokenSource>
+        let mutable cancellationTokenSource = Unchecked.defaultof<CancellationTokenSource>
+        cancellationTokenSource <- CancellationTokenSource.CreateLinkedTokenSource(ct)
 
-                appLifetime.ApplicationStarted.Register(fun _ ->
+        appLifetime.ApplicationStarted.Register(fun _ ->
 
-                logger.LogDebug("Application has started")
+          async {
 
-                cancellationTokenSource <- CancellationTokenSource.CreateLinkedTokenSource(ct)
+            logger.LogDebug("Application has started")
 
-                this.applicationTask <-
-                    async {
-                        try
-                            try
+            try
 
-                                // 1.normal
-                                // logger.LogInformation "Hello World!"
+              try
 
-                                // 2.error
-                                // failwith "my error!"
+                // 1.normal
+                logger.LogInformation "Hello World!"
 
-                                // 3.user cancel
-                                do! async{
-                                    while true do
-                                        cancellationTokenSource.Token.ThrowIfCancellationRequested()
-                                        $"{DateTime.Now}" |> logger.LogInformation
-                                        do! Async.Sleep 1000
-                                }
+                // 2.error
+                // failwith "my error!"
 
-                                this.exitCode <- Nullable(0)
-                            with
-                                | :? TaskCanceledException as ex ->
-                                    // This means the application is shutting down, so just swallow this exception
-                                    ()
-                                | :? OperationCanceledException as ex ->
-                                    logger.LogError(ex, "USER'S CANCEL!");
-                                | _ as ex ->
-                                    logger.LogError(ex, "MY ERROR!");
-                                    this.exitCode <- Nullable(1)
-                        finally
-                            // Stop the application once the work is done
-                            appLifetime.StopApplication()
-                    }
-                    |> Async.StartAsTask
-                    :> Task
+                // 3.user cancel
+                // do! async{
+                //   while true do
+                //     $"{DateTime.Now}" |> logger.LogInformation
+                //     do! Async.Sleep 1000
+                // }
 
-                ) |> ignore
+                this.exitCode <- Nullable(0)
 
-                appLifetime.ApplicationStopping.Register(fun _ ->
-                    logger.LogDebug("Application is stopping")
-                    cancellationTokenSource.Cancel()
-                ) |> ignore
+              with ex ->
 
-                return Task.CompletedTask
+                logger.LogError(ex,ex.Message)
+                this.error <- ex
+                this.exitCode <- Nullable(1)
 
-            }
-            |> Async.StartAsTask
-            :> Task
+            finally
+
+              if this.exitCode.HasValue
+              then
+                logger.LogDebug("call StopApplication()")
+                appLifetime.StopApplication()
+
+          }
+          |> fun x -> Async.Start(x,cancellationToken=cancellationTokenSource.Token)
+
+        ) |> ignore
+
+        appLifetime.ApplicationStopping.Register(fun _ ->
+
+          // Ctrl+C will immediately come to this place.
+          if this.exitCode.HasValue |> not
+          then
+            logger.LogDebug("call StopApplication()")
+            logger.LogDebug("call Cancel()")
+            cancellationTokenSource.Cancel()
+
+          logger.LogDebug("Application is stopping...")
+
+        ) |> ignore
+
+        return Task.CompletedTask
+
+      }
+      |> fun x -> Async.StartAsTask(x, cancellationToken = ct)
+      :> Task
 
 
-        member _.StopAsync(ct: CancellationToken): Task =
-            async {
+    member _.StopAsync(ct: CancellationToken): Task =
 
-                logger.LogDebug($"Exiting with return code: {this.exitCode}");
+      async {
 
-                // Wait for the application logic to fully complete any cleanup tasks.
-                // Note that this relies on the cancellation token to be properly used in the application.
-                do! this.applicationTask |> Async.AwaitTask
+        logger.LogDebug("Application is stoped!")
 
-                // Exit code may be null if the user cancelled via Ctrl+C/SIGTERM
-                Environment.ExitCode <- this.exitCode.GetValueOrDefault(-1)
+        // Exit code may be null if the user cancelled via Ctrl+C/SIGTERM
+        Environment.ExitCode <- this.exitCode.GetValueOrDefault(-1)
+        logger.LogDebug($"Exiting with return code: {Environment.ExitCode}");
 
-            }
-            |> Async.StartAsTask
-            :> Task
+        // clean up
+        match Environment.ExitCode with
+        | 0 ->
+          logger.LogDebug("clean up for normal!")
+        | 1 ->
+          logger.LogDebug("clean up for error!")
+        | _ ->
+          logger.LogDebug("clean up for cancel!")
+
+        return Task.CompletedTask
+
+      }
+      |> fun x -> Async.StartAsTask(x, cancellationToken = ct)
+      :> Task
