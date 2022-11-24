@@ -3,3 +3,4 @@
 .fake/*
 bin/*
 obj/*
+.vscode/settings.json
