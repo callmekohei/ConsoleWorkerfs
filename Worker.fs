@@ -52,7 +52,6 @@ type Worker(
 
               with ex ->
 
-                logger.LogError(ex,ex.Message)
                 this.error <- ex
                 this.exitCode <- Nullable(1)
 
@@ -103,6 +102,7 @@ type Worker(
         | 0 ->
           logger.LogDebug("clean up for normal!")
         | 1 ->
+          logger.LogError(this.error,this.error.Message)
           logger.LogDebug("clean up for error!")
         | _ ->
           logger.LogDebug("clean up for cancel!")
