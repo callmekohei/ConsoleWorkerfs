@@ -9,7 +9,7 @@ open Microsoft.Extensions.Configuration
 
 type Worker(
     logger      : ILogger<Worker>
-  , config      : IConfiguration
+  , cfg         : IConfiguration
   , appLifetime : IHostApplicationLifetime
   ) as this =
 
