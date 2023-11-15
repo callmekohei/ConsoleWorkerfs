@@ -124,11 +124,16 @@ module private WorkerHelpers =
     (getExitCode    : unit -> Nullable<int>)
     (updateExitCode : Nullable<int> -> unit)
     = task {
+
       let mutable cts = Unchecked.defaultof<CancellationTokenSource>
       cts <- CancellationTokenSource.CreateLinkedTokenSource(ct)
+
+      // registered action for console action / action for cancel action
       appLifetime.ApplicationStarted.Register  (onStarted  logger cfg appLifetime updateError getExitCode updateExitCode ) |> ignore
       appLifetime.ApplicationStopping.Register (onStopping logger cfg cts getExitCode) |> ignore
+
       return Task.CompletedTask
+
     }
 
 
