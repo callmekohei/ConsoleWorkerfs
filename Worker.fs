@@ -128,7 +128,7 @@ module private WorkerHelpers =
       let mutable cts = Unchecked.defaultof<CancellationTokenSource>
       cts <- CancellationTokenSource.CreateLinkedTokenSource(ct)
 
-      // registered action for console action / action for cancel action
+      // registered action for console action / cancel action
       appLifetime.ApplicationStarted.Register  (onStarted  logger cfg appLifetime updateError getExitCode updateExitCode ) |> ignore
       appLifetime.ApplicationStopping.Register (onStopping logger cfg cts getExitCode) |> ignore
 
