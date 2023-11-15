@@ -41,7 +41,7 @@ module private WorkerHelpersUserCode =
   let userCodeCleanUp
     (logger   : ILogger<_>)
     (cfg      : IConfiguration)
-    (getError    : unit -> exn)
+    (getError : unit -> exn)
     (exitCode : int)
     = task {
 
