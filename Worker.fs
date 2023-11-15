@@ -22,18 +22,18 @@ module private WorkerHelpersUserCode =
     (cfg    : IConfiguration)
     = task {
 
-          // 1.normal
-          logger.LogWarning "Hello World!"
+        // 1.normal
+        logger.LogWarning "Hello World!"
 
-          // 2.error
-          // failwith "my error!"
+        // 2.error
+        // failwith "my error!"
 
-          // // 3.user cancel
-          // do! async{
-          //   while true do
-          //     $"{DateTime.Now}" |> logger.LogInformation
-          //     do! Async.Sleep 1000
-          // }
+        // // 3.user cancel
+        // do! async{
+        //   while true do
+        //     $"{DateTime.Now}" |> logger.LogInformation
+        //     do! Async.Sleep 1000
+        // }
 
     }
 
