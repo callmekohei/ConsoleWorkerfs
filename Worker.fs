@@ -9,155 +9,181 @@ namespace Worker
 *)
 
 open System
+open System.Collections.Concurrent
 open System.Threading
 open System.Threading.Tasks
 open Microsoft.Extensions.Hosting
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Configuration
 
-module private WorkerHelpersUserCode =
+// WorkerUserCode: Defines user-specific code for the console application.
+module private WorkerUserCode =
 
-  let userCodeOnStarted
+  let consoleApplicationAsync
     (logger : ILogger<_>)
     (cfg    : IConfiguration)
-    = task {
+    = async {
 
-        // 1.normal
-        logger.LogWarning "Hello World!"
+      // (* 1.normal *)
+      logger.LogWarning "Hello World!"
 
-        // 2.error
-        // failwith "my error!"
+      (* 2.error *)
+      // failwith "my error!"
 
-        // // 3.user cancel
-        // do! async{
-        //   while true do
-        //     $"{DateTime.Now}" |> logger.LogInformation
-        //     do! Async.Sleep 1000
-        // }
+      // (* 3.user cancel *)
+      // do! async{
+      //   while true do
+      //     $"{DateTime.Now}" |> logger.LogInformation
+      //     do! Async.Sleep 1000
+      // }
 
     }
 
-
-  let userCodeCleanUp
+  let cleanUpAsync
     (logger   : ILogger<_>)
     (cfg      : IConfiguration)
     (getError : unit -> exn)
     (exitCode : int)
-    = task {
+    = async {
 
-        match exitCode with
-        | 0 ->
+      match exitCode with
+      | 0 ->
 
-          logger.LogDebug("clean up for normal!")
+        logger.LogDebug("clean up for normal!")
 
-        | 1 ->
+      | 1 ->
 
-          logger.LogError(getError(), getError().Message)
-          logger.LogDebug("clean up for error!")
+        logger.LogError(getError(), getError().Message)
+        logger.LogDebug("clean up for error!")
 
-        | _ ->
+      | _ ->
 
-          logger.LogDebug("clean up for cancel!")
+        logger.LogDebug("clean up for cancel!")
     }
 
 
 module private WorkerHelpers =
 
-  open WorkerHelpersUserCode
+  open WorkerUserCode
 
-  let onStarted
+  let onStartedAsync
     (logger         : ILogger<_>)
     (cfg            : IConfiguration)
     (appLifetime    : IHostApplicationLifetime)
     (updateError    : exn -> unit)
-    (getExitCode    : unit -> Nullable<int>)
     (updateExitCode : Nullable<int> -> unit)
-    = fun _ ->
-        task {
+    = async {
 
-          try
+      try
 
-            try
+        try
 
-              logger.LogDebug("Application has started")
-              do! userCodeOnStarted logger cfg
-              updateExitCode (Nullable(0))
+          logger.LogDebug("Application has started")
 
-            with ex ->
+          // run user code
+          do! consoleApplicationAsync logger cfg
 
-              updateError ex
-              updateExitCode (Nullable(1))
+          updateExitCode(Nullable(0))
 
-          finally
+        with
+          | :? TaskCanceledException ->
+            // Ignore TaskCanceledException as it indicates the application is being shut down.
+            ()
+          | :? OperationCanceledException ->
+            // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
+            ()
+          | _ as ex ->
+            updateError(ex)
+            updateExitCode(Nullable(1))
 
-            if getExitCode().HasValue
-            then
-              logger.LogDebug("call StopApplication()")
-              appLifetime.StopApplication()
+      finally
+        // Stop the application when the main logic is completed or an exception occurs.
+        appLifetime.StopApplication()
 
-        } |> ignore
+      }
 
-
-  let onStopping
+  let onStoppingAsync
     (logger      : ILogger<_>)
     (cfg         : IConfiguration)
-    (cts         : CancellationTokenSource)
     (getExitCode : unit -> Nullable<int>)
-    = fun _ ->
+    = async {
 
-    // Ctrl+C will immediately come to this place.
-    if getExitCode().HasValue |> not
-    then
-      logger.LogDebug("call StopApplication()")
-      logger.LogDebug("call Cancel()")
-      cts.Cancel()
+      logger.LogDebug("Application is stopping...")
 
-    logger.LogDebug("Application is stopping...")
+      // Ctrl+C will immediately come to this place.
+      if getExitCode().HasValue |> not
+      then
+        logger.LogDebug("Canceling Tasks...")
+        let! ct = Async.CancellationToken
+        use cts = CancellationTokenSource.CreateLinkedTokenSource(ct)
+        cts.Cancel()
 
+    }
 
   let startAsync
     (logger         : ILogger<_>)
     (cfg            : IConfiguration)
-    (appLifetime    : IHostApplicationLifetime)
     (ct             : CancellationToken)
+    (appLifetime    : IHostApplicationLifetime)
     (updateError    : exn -> unit)
     (getExitCode    : unit -> Nullable<int>)
     (updateExitCode : Nullable<int> -> unit)
-    = task {
+    : Task
+    =
+      async {
 
-      let mutable cts = Unchecked.defaultof<CancellationTokenSource>
-      cts <- CancellationTokenSource.CreateLinkedTokenSource(ct)
+        let! ct' = Async.CancellationToken
 
-      // registered action for console action / cancel action
-      appLifetime.ApplicationStarted.Register  (onStarted  logger cfg appLifetime updateError getExitCode updateExitCode ) |> ignore
-      appLifetime.ApplicationStopping.Register (onStopping logger cfg cts getExitCode) |> ignore
+        let onStared = fun () ->
+          onStartedAsync logger cfg appLifetime updateError updateExitCode
+          |> fun x -> Async.Start(x,cancellationToken=ct')
+          |> ignore
 
-      return Task.CompletedTask
+        let onStopping = fun () ->
+          onStoppingAsync logger cfg getExitCode
+          |> fun x -> Async.Start(x,cancellationToken=ct')
+          |> ignore
 
-    }
+        appLifetime.ApplicationStarted.Register  <| onStared   |> ignore
+        appLifetime.ApplicationStopping.Register <| onStopping |> ignore
 
+        return Task.CompletedTask
+
+      }
+      |> fun x -> Async.StartAsTask(computation=x,cancellationToken=ct)
+      :> Task
 
   let stopAsync
-    (logger      : ILogger<_>)
-    (cfg         : IConfiguration)
-    (ct          : CancellationToken)
-    (getError    : unit -> exn)
-    (getExitCode : unit -> Nullable<int>)
-    = task {
-
-        logger.LogDebug("Application is stoped!")
+    (logger             : ILogger<_>)
+    (cfg                : IConfiguration)
+    (ct                 : CancellationToken)
+    (getApplicationTask : unit -> bool * Task)
+    (getError           : unit -> exn)
+    (getExitCode        : unit -> Nullable<int>)
+    : Task
+    =
+      async {
 
         // Exit code may be null if the user cancelled via Ctrl+C/SIGTERM
         Environment.ExitCode <- getExitCode().GetValueOrDefault(-1)
         logger.LogDebug($"Exiting with return code: {Environment.ExitCode}");
 
-        // clean up
-        do! userCodeCleanUp logger cfg getError Environment.ExitCode
+        // Wait for the application logic to fully complete any cleanup tasks.
+        // Note that this relies on the cancellation token to be properly used in the application.
+        let couldGetTask , applicationTask = getApplicationTask()
+        if couldGetTask && (applicationTask.IsCompleted |> not )
+        then do! applicationTask |> Async.AwaitTask
+
+        logger.LogDebug("Application is stopped!")
+
+        // clean up by user code
+        do! cleanUpAsync logger cfg getError Environment.ExitCode
 
         return Task.CompletedTask
 
-    }
-
+      }
+      |> fun x -> Async.StartAsTask(computation=x,cancellationToken=ct)
+      :> Task
 
 type Worker(
       logger      : ILogger<_>
@@ -165,17 +191,38 @@ type Worker(
     , appLifetime : IHostApplicationLifetime
   ) as this =
 
-  [<DefaultValue>] val mutable error : exn
-  let getError ()   = this.error
-  let updateError x = this.error <- x
+  let dictApplicationTask = ConcurrentDictionary<string,Task>()
+  let dictError           = ConcurrentDictionary<string, exn>()
+  let dictExitCode        = ConcurrentDictionary<string, Nullable<int>>()
 
-  [<DefaultValue>] val mutable exitCode : Nullable<int>
-  let getExitCode ()   = this.exitCode
-  let updateExitCode x = this.exitCode <- x
+  member this.UpdateApplicationTask(task: Task) =
+    dictApplicationTask.AddOrUpdate("applicationTask", task, (fun _ _ -> task)) |> ignore
+
+  member this.UpdateError(e: exn) =
+    dictError.AddOrUpdate("error", e, (fun _ _ -> e)) |> ignore
+
+  member this.UpdateExitCode(code: Nullable<int>) =
+    dictExitCode.AddOrUpdate("exitCode", code, (fun _ _ -> code)) |> ignore
+
+  member this.GetApplicationTask() =
+    dictApplicationTask.TryGetValue("applicationTask")
+
+  member this.GetError() =
+    let _, value = dictError.TryGetValue("error")
+    value
+
+  member this.GetExitCode() =
+    let _, value = dictExitCode.TryGetValue("exitCode")
+    value
 
   interface IHostedService with
-    member _.StartAsync (ct: CancellationToken) = WorkerHelpers.startAsync logger cfg appLifetime ct updateError getExitCode updateExitCode
-    member _.StopAsync  (ct: CancellationToken) = WorkerHelpers.stopAsync  logger cfg ct getError getExitCode
+    member _.StartAsync (ct: CancellationToken) =
+      let applicationTask = WorkerHelpers.startAsync logger cfg ct appLifetime this.UpdateError this.GetExitCode this.UpdateExitCode
+      this.UpdateApplicationTask(applicationTask)
+      applicationTask
+
+    member _.StopAsync  (ct: CancellationToken) =
+      WorkerHelpers.stopAsync logger cfg ct this.GetApplicationTask this.GetError this.GetExitCode
 
   interface IHostedLifecycleService with
     member _.StartingAsync (ct: CancellationToken) = Task.CompletedTask
