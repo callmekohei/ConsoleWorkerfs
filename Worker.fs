@@ -135,6 +135,7 @@ module private WorkerHelpers =
     (cfg            : IConfiguration)
     (ct             : CancellationToken)
     (appLifetime    : IHostApplicationLifetime)
+    (dictCts        : ConcurrentDictionary<string,CancellationTokenSource>)
     (updateError    : exn -> unit)
     (getExitCode    : unit -> Nullable<int>)
     (updateExitCode : Nullable<int> -> unit)
@@ -144,6 +145,7 @@ module private WorkerHelpers =
 
         // Create a new CancellationTokenSource linked to the external CancellationToken (ct)
         let cts = CancellationTokenSource.CreateLinkedTokenSource(ct)
+        dictCts.AddOrUpdate("cancellationTokenSource", cts, (fun _ _ -> cts)) |> ignore
 
         let onStared = fun () ->
           onStartedAsync logger cfg appLifetime updateError updateExitCode
@@ -168,6 +170,7 @@ module private WorkerHelpers =
     (logger             : ILogger<_>)
     (cfg                : IConfiguration)
     (ct                 : CancellationToken)
+    (dictCts            : ConcurrentDictionary<string,CancellationTokenSource>)
     (getApplicationTask : unit -> bool * Task)
     (getError           : unit -> exn)
     (getExitCode        : unit -> Nullable<int>)
@@ -187,6 +190,11 @@ module private WorkerHelpers =
         Environment.ExitCode <- getExitCode().GetValueOrDefault(-1)
         logger.LogDebug($"Exiting with return code: {Environment.ExitCode}");
 
+        // Retrieve the CancellationTokenSource from the dictionary
+        // Dispose the CancellationTokenSource
+        let success, cts = dictCts.TryRemove("cancellationTokenSource")
+        if success then cts.Dispose()
+
         // clean up by user code
         do! cleanUpAsync logger cfg getError Environment.ExitCode
 
@@ -202,9 +210,10 @@ type Worker(
     , appLifetime : IHostApplicationLifetime
   ) as this =
 
-  let dictApplicationTask = ConcurrentDictionary<string,Task>()
-  let dictError           = ConcurrentDictionary<string, exn>()
-  let dictExitCode        = ConcurrentDictionary<string, Nullable<int>>()
+  let dictCancellationTokenSource = ConcurrentDictionary<string, CancellationTokenSource>()
+  let dictApplicationTask         = ConcurrentDictionary<string,Task>()
+  let dictError                   = ConcurrentDictionary<string, exn>()
+  let dictExitCode                = ConcurrentDictionary<string, Nullable<int>>()
 
   member this.UpdateApplicationTask(task: Task) =
     dictApplicationTask.AddOrUpdate("applicationTask", task, (fun _ _ -> task)) |> ignore
@@ -228,12 +237,12 @@ type Worker(
 
   interface IHostedService with
     member _.StartAsync (ct: CancellationToken) =
-      let applicationTask = WorkerHelpers.startAsync logger cfg ct appLifetime this.UpdateError this.GetExitCode this.UpdateExitCode
+      let applicationTask = WorkerHelpers.startAsync logger cfg ct appLifetime dictCancellationTokenSource this.UpdateError this.GetExitCode this.UpdateExitCode
       this.UpdateApplicationTask(applicationTask)
       applicationTask
 
     member _.StopAsync  (ct: CancellationToken) =
-      WorkerHelpers.stopAsync logger cfg ct this.GetApplicationTask this.GetError this.GetExitCode
+      WorkerHelpers.stopAsync logger cfg ct dictCancellationTokenSource this.GetApplicationTask this.GetError this.GetExitCode
 
   interface IHostedLifecycleService with
     member _.StartingAsync (ct: CancellationToken) = Task.CompletedTask
