@@ -5,9 +5,9 @@
     <InvariantGlobalization>true</InvariantGlobalization>
   </PropertyGroup>
 
-
   <ItemGroup>
-    <Compile Include="Worker.fs" />
+    <Compile Include="CtrlSignals.fs" />
+    <Compile Include="ConsoleWorkerfs.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
 

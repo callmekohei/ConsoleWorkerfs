@@ -1,20 +1,22 @@
-namespace Worker
-
-open System
-open System.Collections.Generic
-open System.Linq
-open System.Threading.Tasks
+open System.Threading
 open Microsoft.Extensions.DependencyInjection
 open Microsoft.Extensions.Hosting
 
-module Program =
-  let createHostBuilder args =
-    Host.CreateDefaultBuilder(args)
-      .ConfigureServices(fun hostContext services ->
-        services.AddHostedService<Worker>() |> ignore)
+[<EntryPoint>]
+let main args =
 
-  [<EntryPoint>]
-  let main args =
-    createHostBuilder(args).Build().Run()
+  let cancellationTokenSource = new CancellationTokenSource()
 
-    0 // exit code
+  Host.CreateDefaultBuilder(args)
+
+    .ConfigureServices(fun hostContext services ->
+      services.AddHostedService<Workerfs.ConsoleWorkerfs>() |> ignore)
+
+    // Enables console support, builds and starts the host, and waits for Ctrl+C or SIGTERM to shut down.
+    .UseConsoleLifetime()
+    .RunConsoleAsync(cancellationTokenSource.Token)
+
+  |> Async.AwaitTask
+  |> Async.RunSynchronously
+
+  0
