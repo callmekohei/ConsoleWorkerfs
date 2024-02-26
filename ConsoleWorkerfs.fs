@@ -35,32 +35,34 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
       member _.StartedAsync(ct:CancellationToken)  = task {
 
         let appCts  = new CancellationTokenSource()
-        let appTsk = task {
-          try
+        let appTsk =
+          async {
+            try
 
-            // (* 1.normal *)
-            // logger.LogWarning "Hello World!"
-            // this.exitCode <- Nullable(0)
-            // appLifetime.StopApplication()
+              // (* 1.normal *)
+              // logger.LogWarning "Hello World!"
+              // this.exitCode <- Nullable(0)
+              // appLifetime.StopApplication()
 
-            (* 2.error *)
-            // failwith "my error!"
+              (* 2.error *)
+              // failwith "my error!"
 
-            (* 3.user cancel *)
-            while not appCts.IsCancellationRequested do
-              $"{DateTime.Now}" |> logger.LogInformation
-              do! Async.Sleep 1000
+              (* 3.user cancel *)
+              while true do
+                $"{DateTime.Now}" |> logger.LogInformation
+                do! Async.Sleep 1000
 
-          with
-            // Ignore TaskCanceledException as it indicates the application is being shut down.
-            | :? TaskCanceledException -> ()
-            // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
-            | :? OperationCanceledException -> ()
-            | _ as ex ->
-              logger.LogError(ex,ex.Message)
-              this.exitCode <- Nullable(1)
-              appLifetime.StopApplication()
-        }
+            with
+              // Ignore TaskCanceledException as it indicates the application is being shut down.
+              | :? TaskCanceledException -> ()
+              // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
+              | :? OperationCanceledException -> ()
+              | _ as ex ->
+                logger.LogError(ex,ex.Message)
+                this.exitCode <- Nullable(1)
+                appLifetime.StopApplication()
+          }
+          |> fun cmp -> Async.StartAsTask(computation=cmp,cancellationToken=appCts.Token)
 
         this.applicationTask <-  appTsk
 
@@ -96,7 +98,17 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         // Wait for the application logic to fully complete any cleanup tasks.
         // Note that this relies on the cancellation token to be properly used in the application.
         if isNull this.applicationTask |> not
-        then do! this.applicationTask
+        then
+          try
+            do! this.applicationTask
+          with
+            // Ignore TaskCanceledException as it indicates the application is being shut down.
+            | :? TaskCanceledException -> ()
+            // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
+            | :? OperationCanceledException -> ()
+            | _ as ex ->
+              logger.LogError(ex,ex.Message)
+              this.exitCode <- Nullable(1)
 
         // cleanup
         match this.exitCode.Value with
