@@ -43,8 +43,8 @@ module private CtrlSignals =
     | CTRL_C_EVENT        = 0 // CTRL+C signal
     | CTRL_BREAK_EVENT    = 1 // CTRL+BREAK signal
     | CTRL_CLOSE_EVENT    = 2 // Signal when the console window is closing
-    | CTRL_LOGOFF_EVENT   = 5 // Signal when the user logs off
-    | CTRL_SHUTDOWN_EVENT = 6 // Signal when the system is shutting down
+    | CTRL_LOGOFF_EVENT   = 5 // Signal when the user logs off ( received only by services )
+    | CTRL_SHUTDOWN_EVENT = 6 // Signal when the system is shutting down (received only by services )
 
   type private ConsoleCtrlDelegate = delegate of CtrlTypes -> bool
 
@@ -55,16 +55,23 @@ module private CtrlSignals =
 
     match ctrlType with
 
-    | CtrlTypes.CTRL_CLOSE_EVENT | CtrlTypes.CTRL_LOGOFF_EVENT | CtrlTypes.CTRL_SHUTDOWN_EVENT  ->
+    // Returning false to allow the generic host to handle the Ctrl+C signal.
+    | CtrlTypes.CTRL_C_EVENT
+    | CtrlTypes.CTRL_BREAK_EVENT
+      -> false
+
+    | CtrlTypes.CTRL_CLOSE_EVENT
+    | CtrlTypes.CTRL_LOGOFF_EVENT   (* received only by services *)
+    | CtrlTypes.CTRL_SHUTDOWN_EVENT (* received only by services *)
+    | _ ->
 
       int ctrlType
-      |> fun n -> -n // exit code : ctrl close is -2
+      |> fun n -> -n
       |> func
       |> Async.RunSynchronously
 
       true
 
-    | _ -> false
 
   let private ctrlSignalsHandler (cancelfunc: int -> Async<unit>) =
     ctrlHandler <- ConsoleCtrlDelegate(fun ctrlType -> consoleCtrlHandler cancelfunc ctrlType )

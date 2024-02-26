@@ -10,6 +10,8 @@ namespace Workerfs
        1 : error
       -1 : cancel
       -2 : close
+      -5 : log off  (received only by services)
+      -6 : shutdown (received only by services)
 
 *)
 
@@ -132,6 +134,24 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
           while true do
             do! Async.Sleep 1000 // 1s
             logger.LogDebug("clean up for CLOSE!")
+
+          this.alreadyCleanUp <- true
+
+        // CTRL LOGOFF EVENT(dafault time is 5s , received only by services)
+        | -5 ->
+
+          while true do
+            do! Async.Sleep 1000 // 1s
+            logger.LogDebug("clean up for LOGOFF!")
+
+          this.alreadyCleanUp <- true
+
+        // CTRL SHUTDOWN EVENT(dafault time is 20s , received only by services)
+        | -6 ->
+
+          while true do
+            do! Async.Sleep 1000 // 1s
+            logger.LogDebug("clean up for SHUTDOWN!")
 
           this.alreadyCleanUp <- true
 
