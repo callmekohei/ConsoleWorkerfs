@@ -76,8 +76,10 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         ct.Register(fun () -> registration'.Dispose()) |> ignore
 
         let ctrlSignalHander n = async{
-          appLifetime.StopApplication()
-          this.exitCode <- Nullable(n)
+          if this.exitCode.HasValue |> not
+          then
+            appLifetime.StopApplication()
+            this.exitCode <- Nullable(n)
           while this.alreadyCleanUp |> not do
             do! Async.Sleep 1000 // polling time is 1s
         }
@@ -104,6 +106,8 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
             do! Async.Sleep 1000 // 1s
             logger.LogDebug("clean up for NORMAl!")
 
+          this.alreadyCleanUp <- true
+
         // ERROR
         |  1 ->
 
@@ -111,12 +115,16 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
             do! Async.Sleep 1000 // 1s
             logger.LogDebug("clean up for ERROR!")
 
+          this.alreadyCleanUp <- true
+
         // CTRL C EVENT
         | -1 ->
 
           for _ in [1..10] do
             do! Async.Sleep 1000 // 1s
             logger.LogDebug("clean up for CANCEl!")
+
+          this.alreadyCleanUp <- true
 
         // CTRL CLOSE EVENT(dafault time is 5s)
         | -2 ->
