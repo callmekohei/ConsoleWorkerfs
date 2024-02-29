@@ -13,7 +13,7 @@ let main args =
       services.AddHostedService<Workerfs.ConsoleWorkerfs>() |> ignore)
 
     // Enables console support, builds and starts the host, and waits for Ctrl+C or SIGTERM to shut down.
-    .UseConsoleLifetime()
+    // RunConsoleAsync is hostBuilder.UseConsoleLifetime().Build().RunAsync(cancellationToken)
     .RunConsoleAsync(cancellationTokenSource.Token)
 
   |> Async.AwaitTask
