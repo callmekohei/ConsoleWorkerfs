@@ -62,15 +62,9 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
                 $"{DateTime.Now}" |> logger.LogInformation
                 do! Async.Sleep 1000
 
-            with
-              // Ignore TaskCanceledException as it indicates the application is being shut down.
-              | :? TaskCanceledException -> ()
-              // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
-              | :? OperationCanceledException -> ()
-              | _ as ex ->
-                logger.LogError(ex,ex.Message)
-                this.exitCode <- Nullable(1)
-                appLifetime.StopApplication()
+            with e ->
+              errorAction e
+              appLifetime.StopApplication()
           }
           |> fun cmp -> Async.StartAsTask(computation=cmp,cancellationToken=appCts.Token)
 
@@ -109,16 +103,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         // Note that this relies on the cancellation token to be properly used in the application.
         if isNull this.applicationTask |> not
         then
-          try
-            do! this.applicationTask
-          with
-            // Ignore TaskCanceledException as it indicates the application is being shut down.
-            | :? TaskCanceledException -> ()
-            // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
-            | :? OperationCanceledException -> ()
-            | _ as ex ->
-              logger.LogError(ex,ex.Message)
-              this.exitCode <- Nullable(1)
+          with e -> errorAction e
 
         // cleanup
         match this.exitCode.Value with
