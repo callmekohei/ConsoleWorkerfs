@@ -91,8 +91,14 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
         let registration' = appLifetime.ApplicationStopping.Register( fun () ->
           // exitCode is null when ctrl + C
-          if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
-          appCts.Cancel()
+          if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1) // -1:cancel
+          if isNull appCts |> not
+          then
+            try
+              appCts.Cancel()
+              appCts.Dispose()
+            with e ->
+              errorAction e
         )
 
         ct.Register(fun () -> registration.Dispose()) |> ignore
