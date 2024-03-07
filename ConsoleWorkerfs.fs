@@ -40,9 +40,24 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
     interface IHostedLifecycleService with
 
-      member _.StartingAsync(ct:CancellationToken) = Task.CompletedTask
-      member _.StartAsync(ct:CancellationToken)    = Task.CompletedTask
-      member _.StartedAsync(ct:CancellationToken)  = task {
+      member _.StartingAsync(ct:CancellationToken) = task {
+
+        let ctrlSignalHander n = async{
+
+          if this.exitCode.HasValue |> not
+          then
+            this.exitCode <- Nullable(n) // -2:close -5:log off (received only by services) -6:shutdown (received only by services)
+            appLifetime.StopApplication()
+
+          // polling time is 1s
+          while this.alreadyCleanUp |> not do
+            do! Async.Sleep 1000
+
+        }
+
+        CtrlSignals.setCtrlSignalsHandler ctrlSignalHander
+
+      }
 
         let appCts  = new CancellationTokenSource()
         let appTsk =
@@ -83,15 +98,6 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         ct.Register(fun () -> registration.Dispose()) |> ignore
         ct.Register(fun () -> registration'.Dispose()) |> ignore
 
-        let ctrlSignalHander n = async{
-          if this.exitCode.HasValue |> not
-          then
-            appLifetime.StopApplication()
-            this.exitCode <- Nullable(n)
-          while this.alreadyCleanUp |> not do
-            do! Async.Sleep 1000 // polling time is 1s
-        }
-        CtrlSignals.setCtrlSignalsHandler ctrlSignalHander
 
       }
 
