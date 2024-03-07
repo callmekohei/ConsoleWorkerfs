@@ -28,6 +28,16 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
     [<DefaultValue>] val mutable exitCode        : Nullable<int>
     [<DefaultValue>] val mutable alreadyCleanUp  : bool
 
+    let errorAction (ex:exn) =
+      match ex with
+      // Ignore TaskCanceledException as it indicates the application is being shut down.
+      | :? TaskCanceledException -> ()
+      // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
+      | :? OperationCanceledException -> ()
+      | _ as ex ->
+        logger.LogError(ex,ex.Message)
+        this.exitCode <- Nullable(1) // 1:error
+
     interface IHostedLifecycleService with
 
       member _.StartingAsync(ct:CancellationToken) = Task.CompletedTask
