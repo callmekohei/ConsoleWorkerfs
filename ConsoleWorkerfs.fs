@@ -34,9 +34,9 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
     let errorAction (ex:exn) =
       match ex with
       // Ignore TaskCanceledException as it indicates the application is being shut down.
-      | :? TaskCanceledException -> ()
+      | :? TaskCanceledException      -> if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
       // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
-      | :? OperationCanceledException -> ()
+      | :? OperationCanceledException -> if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
       | _ as ex ->
         logger.LogError(ex,ex.Message)
         this.exitCode <- Nullable(1) // 1:error
