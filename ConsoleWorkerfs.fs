@@ -38,6 +38,14 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         logger.LogError(ex,ex.Message)
         this.exitCode <- Nullable(1) // 1:error
 
+    interface IDisposable with
+      member this.Dispose() =
+        if isNull this.applicationCts |> not
+        then
+          try this.applicationCts.Dispose()
+          with e -> logger.LogError($"Exception during applicationCts disposal: {e.Message}")
+          this.applicationCts <- null
+
     interface IHostedLifecycleService with
 
       member _.StartingAsync(ct:CancellationToken) = task {
