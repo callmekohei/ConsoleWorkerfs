@@ -69,28 +69,32 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
       }
 
+      member _.StartedAsync(ct:CancellationToken) = task {
 
         let appCts  = new CancellationTokenSource()
         let appTsk =
           async {
             try
 
+              let! ct = Async.CancellationToken
+
               // (* 1.normal *)
               // logger.LogWarning "Hello World!"
-              // this.exitCode <- Nullable(0)
+              // this.exitCode <- Nullable(0) // 0:normal
               // appLifetime.StopApplication()
 
               (* 2.error *)
               // failwith "my error!"
 
               (* 3.user cancel *)
-              while true do
+              while ct.IsCancellationRequested |> not do
                 $"{DateTime.Now}" |> logger.LogInformation
                 do! Async.Sleep 1000
 
             with e ->
               errorAction e
               appLifetime.StopApplication()
+
           }
           |> fun cmp -> Async.StartAsTask(computation=cmp,cancellationToken=appCts.Token)
 
