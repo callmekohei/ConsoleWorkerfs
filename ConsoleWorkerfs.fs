@@ -59,6 +59,17 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
       }
 
+      member _.StartAsync(ct:CancellationToken) = task {
+
+        try
+          () // do something
+        with e ->
+          errorAction e
+          appLifetime.StopApplication()
+
+      }
+
+
         let appCts  = new CancellationTokenSource()
         let appTsk =
           async {
