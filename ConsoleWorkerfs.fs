@@ -130,6 +130,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         // Note that this relies on the cancellation token to be properly used in the application.
         if isNull this.applicationTask |> not
         then
+          try do! this.applicationTask
           with e -> errorAction e
 
         // cleanup
