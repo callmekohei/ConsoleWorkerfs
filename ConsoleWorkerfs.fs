@@ -22,35 +22,42 @@ open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Hosting
 
+// Defines the ConsoleWorkerfs class for handling the application's lifecycle and cleanup.
 type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLifetime: IHostApplicationLifetime) as this =
 
+    // Initializes default mutable fields.
     [<DefaultValue>] val mutable applicationCts  : CancellationTokenSource
     [<DefaultValue>] val mutable applicationTask : Task
     [<DefaultValue>] val mutable exitCode        : Nullable<int>
     [<DefaultValue>] val mutable alreadyCleanUp  : bool
 
+    // Creates a new CancellationTokenSource upon instantiation.
     do this.applicationCts <- new CancellationTokenSource()
 
+    // Handles exceptions uniformly, setting appropriate exit codes and logging errors.
     let errorAction (ex:exn) =
       match ex with
-      // Ignore TaskCanceledException as it indicates the application is being shut down.
-      | :? TaskCanceledException      -> if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
-      // OperationCanceledException is also ignored as it signifies a user-initiated cancellation.
-      | :? OperationCanceledException -> if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
+      // Handles cancellation-related exceptions by setting the exit code to -1 (cancel).
+      | :? TaskCanceledException | :? OperationCanceledException -> if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
+      // Logs other exceptions and sets the exit code to 1 (error).
       | _ as ex ->
         logger.LogError(ex,ex.Message)
-        this.exitCode <- Nullable(1) // 1:error
+        this.exitCode <- Nullable(1)
 
+    // Implements IDisposable for resource cleanup.
     interface IDisposable with
       member this.Dispose() =
+        // Disposes of the CancellationTokenSource safely.
         if isNull this.applicationCts |> not
         then
           try this.applicationCts.Dispose()
           with e -> logger.LogError($"Exception during applicationCts disposal: {e.Message}")
           this.applicationCts <- null
 
+    // Implements IHostedLifecycleService for managing the application's lifecycle.
     interface IHostedLifecycleService with
 
+      // Prepares the service for starting, including setting up cancellation tokens and exit codes.
       member _.StartingAsync(ct:CancellationToken) = task {
 
         let registration = appLifetime.ApplicationStopping.Register( fun () ->
@@ -64,40 +71,37 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
         ct.Register(fun () -> registration.Dispose()) |> ignore
 
-        // close, log off, shutdown
+        // Handles specific shutdown signals, applying relevant exit codes.
         let ctrlSignalHander n = async{
-
           if this.exitCode.HasValue |> not
           then
-            this.exitCode <- Nullable(n) // -2:close -5:log off (received only by services) -6:shutdown (received only by services)
+            this.exitCode <- Nullable(n)
             appLifetime.StopApplication()
-
-          // polling time is 1s
           while this.alreadyCleanUp |> not do
-            do! Async.Sleep 1000
-
+            do! Async.Sleep 1000 // polling time is 1s
         }
 
         CtrlSignals.setCtrlSignalsHandler ctrlSignalHander
 
       }
 
+      // Placeholder for the service's start logic; might include configuration settings or initialization tasks.
       member _.StartAsync(ct:CancellationToken) = task {
-
         try
-          () // do something
+          () // Add initialization logic here.
         with e ->
           errorAction e
           appLifetime.StopApplication()
-
       }
 
+      // Contains the main logic to be executed once the service has started.
       member _.StartedAsync(ct:CancellationToken) = task {
 
         if this.exitCode.HasValue
         then return Task.CompletedTask
         else
 
+          // Add primary task execution logic here.
           this.applicationTask <-
             async {
               try
@@ -134,8 +138,13 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
       }
 
+      // Defines actions to be taken when the service is stopping.
       member _.StoppingAsync(ct:CancellationToken) = Task.CompletedTask
+
+      // Defines actions to be taken after the service has stopped.
       member _.StopAsync(ct:CancellationToken)     = Task.CompletedTask
+
+      // Cleans up resources and performs final actions after the service has completely stopped.
       member _.StoppedAsync(ct:CancellationToken)  = task {
 
         // Wait for the application logic to fully complete any cleanup tasks.
@@ -145,10 +154,10 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
           try do! this.applicationTask
           with e -> errorAction e
 
-        // cleanup
+        // Matches the exit code to determine the appropriate cleanup actions.
         match this.exitCode.Value with
 
-        // NORMAL
+        // NORMAL exit
         |  0 ->
 
           for _ in [1..10] do
@@ -157,7 +166,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
           this.alreadyCleanUp <- true
 
-        // ERROR
+        // Error exit
         |  1 ->
 
           for _ in [1..10] do
@@ -166,7 +175,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
           this.alreadyCleanUp <- true
 
-        // CTRL C EVENT
+        // Cancelled
         | -1 ->
 
           for _ in [1..10] do
@@ -175,7 +184,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
           this.alreadyCleanUp <- true
 
-        // CTRL CLOSE EVENT(dafault time is 5s)
+        // Closed (dafault time is 5s)
         | -2 ->
 
           while true do
@@ -184,7 +193,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
           this.alreadyCleanUp <- true
 
-        // CTRL LOGOFF EVENT(dafault time is 5s , received only by services)
+        // Logoff (dafault time is 5s , received only by services)
         | -5 ->
 
           while true do
@@ -193,7 +202,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
           this.alreadyCleanUp <- true
 
-        // CTRL SHUTDOWN EVENT(dafault time is 20s , received only by services)
+        // Shutdown (dafault time is 20s , received only by services)
         | -6 ->
 
           while true do
@@ -202,6 +211,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
           this.alreadyCleanUp <- true
 
+        // Ohter cases
         | _ ->
 
           this.alreadyCleanUp <- true
