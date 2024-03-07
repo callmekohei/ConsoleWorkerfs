@@ -24,9 +24,12 @@ open Microsoft.Extensions.Hosting
 
 type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLifetime: IHostApplicationLifetime) as this =
 
+    [<DefaultValue>] val mutable applicationCts  : CancellationTokenSource
     [<DefaultValue>] val mutable applicationTask : Task
     [<DefaultValue>] val mutable exitCode        : Nullable<int>
     [<DefaultValue>] val mutable alreadyCleanUp  : bool
+
+    do this.applicationCts <- new CancellationTokenSource()
 
     let errorAction (ex:exn) =
       match ex with
@@ -50,6 +53,18 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
       member _.StartingAsync(ct:CancellationToken) = task {
 
+        let registration = appLifetime.ApplicationStopping.Register( fun () ->
+          // exitCode is null when ctrl + C
+          if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
+          if isNull this.applicationCts |> not
+          then
+            try this.applicationCts.Cancel()
+            with e -> errorAction e
+        )
+
+        ct.Register(fun () -> registration.Dispose()) |> ignore
+
+        // close, log off, shutdown
         let ctrlSignalHander n = async{
 
           if this.exitCode.HasValue |> not
@@ -79,54 +94,43 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
       member _.StartedAsync(ct:CancellationToken) = task {
 
-        let appCts  = new CancellationTokenSource()
-        let appTsk =
-          async {
-            try
+        if this.exitCode.HasValue
+        then return Task.CompletedTask
+        else
 
-              let! ct = Async.CancellationToken
+          this.applicationTask <-
+            async {
+              try
 
-              // (* 1.normal *)
-              // logger.LogWarning "Hello World!"
-              // this.exitCode <- Nullable(0) // 0:normal
-              // appLifetime.StopApplication()
+                let! ct = Async.CancellationToken
 
-              (* 2.error *)
-              // failwith "my error!"
+                // (* 1.normal *)
+                // logger.LogWarning "Hello World!"
+                // this.exitCode <- Nullable(0) // 0:normal
+                // appLifetime.StopApplication()
 
-              (* 3.user cancel *)
-              while ct.IsCancellationRequested |> not do
-                $"{DateTime.Now}" |> logger.LogInformation
-                do! Async.Sleep 1000
+                (* 2.error *)
+                // failwith "my error!"
 
-            with e ->
-              errorAction e
-              appLifetime.StopApplication()
+                (* 3.user cancel *)
+                while ct.IsCancellationRequested |> not do
+                  $"{DateTime.Now}" |> logger.LogInformation
+                  do! Async.Sleep 1000
 
-          }
-          |> fun cmp -> Async.StartAsTask(computation=cmp,cancellationToken=appCts.Token)
+              with e ->
+                errorAction e
+                appLifetime.StopApplication()
 
-        this.applicationTask <-  appTsk
+            }
+            |> fun cmp -> Async.StartAsTask(computation=cmp,cancellationToken=this.applicationCts.Token)
 
-        let registration = appLifetime.ApplicationStarted.Register(fun () ->
-          appTsk |> ignore
-        )
+          let registration = appLifetime.ApplicationStarted.Register(fun () ->
+            this.applicationTask |> ignore
+          )
 
-        let registration' = appLifetime.ApplicationStopping.Register( fun () ->
-          // exitCode is null when ctrl + C
-          if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1) // -1:cancel
-          if isNull appCts |> not
-          then
-            try
-              appCts.Cancel()
-              appCts.Dispose()
-            with e ->
-              errorAction e
-        )
+          ct.Register(fun () -> registration.Dispose()) |> ignore
 
-        ct.Register(fun () -> registration.Dispose()) |> ignore
-        ct.Register(fun () -> registration'.Dispose()) |> ignore
-
+          return Task.CompletedTask
 
       }
 
