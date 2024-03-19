@@ -6,7 +6,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="CtrlSignals.fs" />
     <Compile Include="ConsoleWorkerfs.fs" />
     <Compile Include="Program.fs" />
   </ItemGroup>
