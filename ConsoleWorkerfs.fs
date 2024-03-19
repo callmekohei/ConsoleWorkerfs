@@ -33,6 +33,7 @@ module private CtrlSignals =
 
   // Delegate type for handling console control signals.
   type private ConsoleCtrlDelegate = delegate of CtrlTypes -> bool
+  let private handlerRef: ConsoleCtrlDelegate option ref = ref None
 
   // Sets the custom control signal handler.
   [<DllImport("kernel32.dll")>]
@@ -40,20 +41,20 @@ module private CtrlSignals =
 
   // Public method to set the control signals handler.
   let setCtrlSignalsHandler cancelfunc =
-    // Create the delegate directly with a lambda expression
     let handler = ConsoleCtrlDelegate(fun ctrlType ->
-        match ctrlType with
-        // Let generic host handle the signal
-        | CtrlTypes.CTRL_C_EVENT | CtrlTypes.CTRL_BREAK_EVENT ->
-          false
-        // Directly call the provided async function and run it synchronously
-        // Halt further processing
-        | _ ->
-          ctrlType |> cancelfunc |> Async.RunSynchronously
-          true
+      match ctrlType with
+      // Let generic host handle the signal
+      | CtrlTypes.CTRL_C_EVENT | CtrlTypes.CTRL_BREAK_EVENT ->
+        false
+      // Directly call the provided async function and run it synchronously
+      // Halt further processing
+      | _ ->
+        ctrlType |> cancelfunc |> Async.RunSynchronously
+        true
     )
 
     // Set the custom control signal handler using the created delegate
+    handlerRef.Value <- Some(handler)
     SetConsoleCtrlHandler(handler, true) |> ignore
 
 
