@@ -1,19 +1,14 @@
 namespace Workerfs
 
-(*
+// ConsoleWorkerfs.fs
 
-  ConsoleWorkerfs.fs
-
-    exit code
-
-       0 : normal
-       1 : error
-      -1 : cancel
-      -2 : close
-      -5 : log off  (received only by services)
-      -6 : shutdown (received only by services)
-
-*)
+type ExitCode =
+  | Normal   = 0
+  | Error    = 1
+  | Cancel   = -1
+  | Close    = 2
+  | LogOff   = 5  // received only by services
+  | Shutdown = 6  // received only by services
 
 open System
 open System.Threading
@@ -68,7 +63,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
     // Initializes default mutable fields.
     [<DefaultValue>] val mutable applicationCts  : CancellationTokenSource
     [<DefaultValue>] val mutable applicationTask : Task
-    [<DefaultValue>] val mutable exitCode        : Nullable<int>
+    [<DefaultValue>] val mutable exitCode        : Nullable<ExitCode>
     [<DefaultValue>] val mutable alreadyCleanUp  : bool
 
     // Creates a new CancellationTokenSource upon instantiation.
@@ -78,11 +73,11 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
     let errorAction (ex:exn) =
       match ex with
       // Handles cancellation-related exceptions by setting the exit code to -1 (cancel).
-      | :? TaskCanceledException | :? OperationCanceledException -> if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
+      | :? TaskCanceledException | :? OperationCanceledException -> if this.exitCode.HasValue |> not then this.exitCode <- Nullable(ExitCode.Cancel)
       // Logs other exceptions and sets the exit code to 1 (error).
       | _ as ex ->
         logger.LogError(ex,ex.Message)
-        this.exitCode <- Nullable(1)
+        this.exitCode <- Nullable(ExitCode.Error)
 
     // Implements IDisposable for resource cleanup.
     interface IDisposable with
@@ -102,7 +97,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
 
         let registration = appLifetime.ApplicationStopping.Register( fun () ->
           // exitCode is null when ctrl + C
-          if this.exitCode.HasValue |> not then this.exitCode <- Nullable(-1)
+          if this.exitCode.HasValue |> not then this.exitCode <- Nullable(ExitCode.Cancel)
           if isNull this.applicationCts |> not
           then
             try this.applicationCts.Cancel()
@@ -112,13 +107,23 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         ct.Register(fun () -> registration.Dispose()) |> ignore
 
         // Handles specific shutdown signals, applying relevant exit codes.
-        let ctrlSignalHander n = async{
+        let ctrlSignalHander (ctrlTypes:CtrlSignals.CtrlTypes) = async{
+
+          let exitCode =
+            match ctrlTypes with
+            | CtrlSignals.CtrlTypes.CTRL_CLOSE_EVENT    -> ExitCode.Close
+            | CtrlSignals.CtrlTypes.CTRL_LOGOFF_EVENT   -> ExitCode.LogOff
+            | CtrlSignals.CtrlTypes.CTRL_SHUTDOWN_EVENT -> ExitCode.Shutdown
+            | _ -> ExitCode.Cancel
+
           if this.exitCode.HasValue |> not
           then
-            this.exitCode <- Nullable(n)
+            this.exitCode <- Nullable(exitCode)
             appLifetime.StopApplication()
+
           while this.alreadyCleanUp |> not do
             do! Async.Sleep 1000 // polling time is 1s
+
         }
 
         CtrlSignals.setCtrlSignalsHandler ctrlSignalHander
@@ -198,7 +203,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
         match this.exitCode.Value with
 
         // NORMAL exit
-        |  0 ->
+        |  ExitCode.Normal ->
 
           for _ in [1..10] do
             do! Async.Sleep 1000 // 1s
@@ -207,7 +212,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
           this.alreadyCleanUp <- true
 
         // Error exit
-        |  1 ->
+        |  ExitCode.Error ->
 
           for _ in [1..10] do
             do! Async.Sleep 1000 // 1s
@@ -216,7 +221,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
           this.alreadyCleanUp <- true
 
         // Cancelled
-        | -1 ->
+        | ExitCode.Cancel ->
 
           for _ in [1..10] do
             do! Async.Sleep 1000 // 1s
@@ -225,7 +230,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
           this.alreadyCleanUp <- true
 
         // Closed (dafault time is 5s)
-        | -2 ->
+        | ExitCode.Close ->
 
           while true do
             do! Async.Sleep 1000 // 1s
@@ -234,7 +239,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
           this.alreadyCleanUp <- true
 
         // Logoff (dafault time is 5s , received only by services)
-        | -5 ->
+        | ExitCode.LogOff ->
 
           while true do
             do! Async.Sleep 1000 // 1s
@@ -243,7 +248,7 @@ type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLi
           this.alreadyCleanUp <- true
 
         // Shutdown (dafault time is 20s , received only by services)
-        | -6 ->
+        | ExitCode.Shutdown ->
 
           while true do
             do! Async.Sleep 1000 // 1s
