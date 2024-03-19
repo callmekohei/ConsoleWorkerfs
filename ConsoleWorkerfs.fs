@@ -22,6 +22,46 @@ open Microsoft.Extensions.Configuration
 open Microsoft.Extensions.Logging
 open Microsoft.Extensions.Hosting
 
+// This module manages the handling of control signals for the console application,
+// such as CTRL+C, CTRL+BREAK, and console window closing signals.
+module private CtrlSignals =
+  open System.Runtime.InteropServices
+
+  // Enum defining the different types of control signals.
+  // HandlerRoutine callback function : https://learn.microsoft.com/en-us/windows/console/handlerroutine
+  type CtrlTypes =
+    | CTRL_C_EVENT        = 0 // CTRL+C signal
+    | CTRL_BREAK_EVENT    = 1 // CTRL+BREAK signal
+    | CTRL_CLOSE_EVENT    = 2 // Signal when the console window is closing
+    | CTRL_LOGOFF_EVENT   = 5 // Signal when the user logs off ( received only by services )
+    | CTRL_SHUTDOWN_EVENT = 6 // Signal when the system is shutting down (received only by services )
+
+  // Delegate type for handling console control signals.
+  type private ConsoleCtrlDelegate = delegate of CtrlTypes -> bool
+
+  // Sets the custom control signal handler.
+  [<DllImport("kernel32.dll")>]
+  extern bool private SetConsoleCtrlHandler(ConsoleCtrlDelegate handler, bool add)
+
+  // Public method to set the control signals handler.
+  let setCtrlSignalsHandler cancelfunc =
+    // Create the delegate directly with a lambda expression
+    let handler = ConsoleCtrlDelegate(fun ctrlType ->
+        match ctrlType with
+        // Let generic host handle the signal
+        | CtrlTypes.CTRL_C_EVENT | CtrlTypes.CTRL_BREAK_EVENT ->
+          false
+        // Directly call the provided async function and run it synchronously
+        // Halt further processing
+        | _ ->
+          ctrlType |> cancelfunc |> Async.RunSynchronously
+          true
+    )
+
+    // Set the custom control signal handler using the created delegate
+    SetConsoleCtrlHandler(handler, true) |> ignore
+
+
 // Defines the ConsoleWorkerfs class for handling the application's lifecycle and cleanup.
 type ConsoleWorkerfs(logger: ILogger<ConsoleWorkerfs>, cfg:IConfiguration, appLifetime: IHostApplicationLifetime) as this =
 
